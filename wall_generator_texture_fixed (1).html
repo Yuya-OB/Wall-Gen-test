@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="utf-8"/>
+<title>壁ジェネレータ 直交吸着1m版</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<style>
+    body { margin: 0; background: #fcfcfc; font-family: sans-serif; overflow: hidden; }
+    .panel { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; gap: 8px; z-index: 10; }
+    .slider-panel { position: absolute; top: 10px; right: 10px; background: white; padding: 10px; border-radius: 6px; box-shadow: 0 0 6px rgba(0,0,0,0.3); z-index: 10; }
+    button { padding: 8px 10px; border-radius: 6px; border: none; background: #3366ff; color: white; font-size: 14px; }
+    input[type="number"] { width: 80px; }
+  
+    .move-controls  {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .move-controls button {
+      padding: 4px 8px;
+      font-size: 16px;
+      border: none;
+      background: #3366ff;
+      color: white;
+      border-radius: 4px;
+    }
+
+</style>
+<script src="https://unpkg.com/three@0.147.0/build/three.min.js">
+function moveSelectedWalls(dx, dy, dz) {
+  selectedWalls.forEach(w => {
+    w.position.x = Math.round((w.position.x + dx) * 2) / 2;
+    w.position.y += dy;
+    w.position.z = Math.round((w.position.z + dz) * 2) / 2;
+  });
+}
+
+</script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/controls/OrbitControls.js">
+function moveSelectedWalls(dx, dy, dz) {
+  selectedWalls.forEach(w => {
+    w.position.x = Math.round((w.position.x + dx) * 2) / 2;
+    w.position.y += dy;
+    w.position.z = Math.round((w.position.z + dz) * 2) / 2;
+  });
+}
+
+</script>
+</head>
+<body>
+<div class="panel">
+<button id="addWallBtn">壁を追加</button>
+<button id="deleteWallBtn">選択削除</button>
+<button id="rotateWallBtn">回転（45°）</button>
+<button id="duplicateWallBtn">複製</button>
+</div>
+<div class="slider-panel">
+    幅: <input id="widthInput" max="5000" min="50" step="50" type="number" value="200"/> cm<br/>
+<input id="widthSlider" max="5000" min="50" step="50" type="range" value="200"/><br/><br/>
+    高さ: <input id="heightInput" max="2000" min="10" step="10" type="number" value="250"/> cm<br/>
+<input id="heightSlider" max="2000" min="10" step="10" type="range" value="250"/>
+</div>
+<script>
+    let scene, camera, renderer, controls;
+    let walls = [], selectedWalls = [];
+
+    init();
+    animate();
+
+    function init() {
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(5, 5, 10);
+      camera.lookAt(0, 0, 0);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setClearColor(0xfcfcfc);
+      document.body.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0);
+      controls.update();
+
+      const gridGroup = new THREE.Group();
+      const gridSize = 30;
+      const step = 0.5;
+      for (let i = -gridSize / 2; i <= gridSize / 2; i += step) {
+        const color = (i % 5 === 0) ? 0xff4444 : 0x999999;
+        const material = new THREE.LineBasicMaterial({ color });
+        const points1 = [new THREE.Vector3(i, 0, -gridSize / 2), new THREE.Vector3(i, 0, gridSize / 2)];
+        const points2 = [new THREE.Vector3(-gridSize / 2, 0, i), new THREE.Vector3(gridSize / 2, 0, i)];
+        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points1), material));
+        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points2), material));
+      }
+      scene.add(gridGroup);
+// 外周4辺に色付きの太線を追加
+const outerLineMaterial = (color) => new THREE.LineBasicMaterial({ color: color });
+const edgeSize = 30;
+const edges = [
+  { color: 0xff0000, start: [-edgeSize/2, 0, -edgeSize/2], end: [ edgeSize/2, 0, -edgeSize/2] }, // 北 赤
+  { color: 0x0000ff, start: [ edgeSize/2, 0, -edgeSize/2], end: [ edgeSize/2, 0,  edgeSize/2] }, // 東 青
+  { color: 0x00ff00, start: [ edgeSize/2, 0,  edgeSize/2], end: [-edgeSize/2, 0,  edgeSize/2] }, // 南 緑
+  { color: 0xff9900, start: [-edgeSize/2, 0,  edgeSize/2], end: [-edgeSize/2, 0, -edgeSize/2] }, // 西 オレンジ
+];
+edges.forEach(({ color, start, end }) => {
+  const material = outerLineMaterial(color);
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...start), new THREE.Vector3(...end)
+  ]);
+  const line = new THREE.Line(geometry, material);
+  line.scale.set(1.01, 1.01, 1.01);  // 微妙にズラして太く見せる
+  scene.add(line);
+});
+
+
+      const light = new THREE.DirectionalLight(0xffffff, 1);
+      light.position.set(10, 20, 10);
+      scene.add(light);
+
+      document.getElementById("addWallBtn").onclick = () => {
+        const geo = new THREE.BoxGeometry(2, 2.5, 0.2);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x888888 });
+        const wall = new THREE.Mesh(geo, mat);
+        wall.position.set(0, 1.25, 0);
+        wall.userData = { width: 2, height: 2.5 };
+        scene.add(wall);
+        walls.push(wall);
+      };
+
+      document.getElementById("rotateWallBtn").onclick = () => {
+        selectedWalls.forEach(w => w.rotation.y += Math.PI / 4);
+      };
+
+      document.getElementById("deleteWallBtn").onclick = () => {
+        selectedWalls.forEach(w => scene.remove(w));
+        walls = walls.filter(w => !selectedWalls.includes(w));
+        selectedWalls = [];
+      };
+
+      document.getElementById("duplicateWallBtn").onclick = () => {
+        const newSelections = [];
+        selectedWalls.forEach(orig => {
+          const geo = orig.geometry.clone();
+          const mat = orig.material.clone();
+          const clone = new THREE.Mesh(geo, mat);
+          clone.position.copy(orig.position).add(new THREE.Vector3(0.5, 0, 0.5));
+          clone.rotation.copy(orig.rotation);
+          clone.userData = { ...orig.userData };
+          scene.add(clone);
+          walls.push(clone);
+          newSelections.push(clone);
+        });
+        selectedWalls.forEach(w => w.material.color.set(0x888888));
+        newSelections.forEach(w => w.material.color.set(0xff3366));
+        selectedWalls = newSelections;
+      };
+
+      const widthSlider = document.getElementById("widthSlider");
+      const widthInput = document.getElementById("widthInput");
+      widthSlider.addEventListener("input", () => {
+        widthInput.value = widthSlider.value;
+        updateWidth(parseFloat(widthSlider.value));
+      });
+      widthInput.addEventListener("input", () => {
+        widthSlider.value = widthInput.value;
+        if (widthInput.value !== '') updateWidth(parseFloat(widthInput.value));
+      });
+
+      function updateWidth(wcm) {
+        const wMeters = wcm / 100;
+        selectedWalls.forEach(w => {
+          const prevWidth = w.geometry.parameters.width || 2;
+          const height = w.userData.height;
+          const angle = w.rotation.y;
+          const dx = Math.cos(angle);
+          const dz = Math.sin(angle);
+          const offset = (wMeters - prevWidth);
+          w.geometry.dispose();
+          w.geometry = new THREE.BoxGeometry(wMeters, height, 0.2);
+          w.userData.width = wMeters;
+          w.position.x += offset / 2 * dx;
+          w.position.z += offset / 2 * dz;
+          w.position.y = height / 2;
+        });
+      }
+
+      const heightSlider = document.getElementById("heightSlider");
+      const heightInput = document.getElementById("heightInput");
+      heightSlider.addEventListener("input", () => {
+        heightInput.value = heightSlider.value;
+        updateHeight(parseFloat(heightSlider.value));
+      });
+      heightInput.addEventListener("input", () => {
+        heightSlider.value = heightInput.value;
+        if (heightInput.value !== '') updateHeight(parseFloat(heightInput.value));
+      });
+
+      function updateHeight(h) {
+        const hMeters = h / 100;
+        selectedWalls.forEach(w => {
+          const width = w.userData.width;
+          w.geometry.dispose();
+          w.geometry = new THREE.BoxGeometry(width, hMeters, 0.2);
+          w.userData.height = hMeters;
+          w.position.y = hMeters / 2;
+        });
+      }
+
+      function getWallEndpoints(wall) {
+        const length = wall.userData.width;
+        const angle = wall.rotation.y;
+        const dx = Math.cos(angle) * length / 2;
+        const dz = Math.sin(angle) * length / 2;
+        const center = wall.position;
+        const start = new THREE.Vector3(center.x - dx, 0, center.z - dz);
+        const end = new THREE.Vector3(center.x + dx, 0, center.z + dz);
+        return [start, end];
+      }
+
+      function snapWallToOthers(movingWall) {
+        const threshold = 1.0;
+        const [startA, endA] = getWallEndpoints(movingWall);
+        for (const otherWall of walls) {
+          if (otherWall === movingWall) continue;
+          const [startB, endB] = getWallEndpoints(otherWall);
+          const endsA = [startA, endA];
+          const endsB = [startB, endB];
+          for (const a of endsA) {
+            for (const b of endsB) {
+              const dist = a.distanceTo(b);
+              const angleDiff = Math.abs((movingWall.rotation.y - otherWall.rotation.y) % Math.PI);
+              const isPerpendicular = Math.abs(angleDiff - Math.PI / 2) < 0.1;
+              if (dist < threshold && isPerpendicular) {
+                const center = movingWall.position;
+                const offset = new THREE.Vector3().subVectors(a, center);
+                movingWall.position.x += b.x - a.x;
+                movingWall.position.z += b.z - a.z;
+                return;
+              }
+            }
+          }
+        }
+      }
+
+      renderer.domElement.addEventListener("click", e => {
+        const mouse = new THREE.Vector2(
+          (e.clientX / window.innerWidth) * 2 - 1,
+          -(e.clientY / window.innerHeight) * 2 + 1
+        );
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(walls);
+        if (intersects.length > 0) {
+          const wall = intersects[0].object;
+          const index = selectedWalls.indexOf(wall);
+          if (index >= 0) {
+            wall.material.color.set(0x888888);
+            selectedWalls.splice(index, 1);
+          } else {
+            wall.material.color.set(0xff3366);
+            selectedWalls.push(wall);
+          }
+        }
+      });
+
+      let isDragging = false;
+      let dragOffset = new THREE.Vector3();
+      let dragTarget = null;
+
+      renderer.domElement.addEventListener("pointerdown", e => {
+        const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(selectedWalls);
+        if (intersects.length > 0) {
+          dragTarget = intersects[0].object;
+          const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+          const intersection = new THREE.Vector3();
+          raycaster.ray.intersectPlane(plane, intersection);
+          dragOffset.subVectors(dragTarget.position, intersection);
+          isDragging = true;
+          controls.enabled = false;
+        }
+      });
+
+      renderer.domElement.addEventListener("pointermove", e => {
+        if (!isDragging || !dragTarget) return;
+        const mouse = new THREE.Vector2((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+        const intersection = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, intersection);
+        if (intersection) {
+          const newPos = intersection.clone().add(dragOffset);
+          const snappedX = Math.round(newPos.x / 0.5) * 0.5;
+          const snappedZ = Math.round(newPos.z / 0.5) * 0.5;
+          dragTarget.position.x = snappedX;
+          dragTarget.position.z = snappedZ;
+          snapWallToOthers(dragTarget);
+        }
+      });
+
+      renderer.domElement.addEventListener("pointerup", () => {
+        isDragging = false;
+        dragTarget = null;
+        controls.enabled = true;
+      });
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+  
+function moveSelectedWalls(dx, dy, dz) {
+  selectedWalls.forEach(w => {
+    w.position.x = Math.round((w.position.x + dx) * 2) / 2;
+    w.position.y += dy;
+    w.position.z = Math.round((w.position.z + dz) * 2) / 2;
+  });
+}
+
+
+// 壁にテクスチャとノーマルマップを適用
+const loader = new THREE.TextureLoader();
+const texture = loader.load("brick_wall_13_nor_dx_4k.jpg");
+const normalMap = loader.load("brick_wall_13_ao_4k.jpg");
+
+walls.forEach(wall => {
+  wall.material.map = texture;
+  wall.material.normalMap = normalMap;
+  wall.material.needsUpdate = true;
+});
+</script>
+<div class="move-controls">
+<button onclick="moveSelectedWalls(0, 0, -0.5)">↑</button><br/>
+<button onclick="moveSelectedWalls(-0.5, 0, 0)">←</button>
+<button onclick="moveSelectedWalls(0.5, 0, 0)">→</button><br/>
+<button onclick="moveSelectedWalls(0, 0, 0.5)">↓</button>
+</div>
+</body>
+</html>
